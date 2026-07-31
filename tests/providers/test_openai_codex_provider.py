@@ -535,3 +535,70 @@ async def test_stream_failure_redacts_credentials_from_customer_diagnostic() -> 
     assert "sk-this-must-never-be-returned" not in exc_info.value.message
     assert "Authorization: <redacted>" in exc_info.value.message
     await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stream_response_accepts_sse_without_content_type() -> None:
+    """The ChatGPT backend streams SSE without declaring a Content-Type header."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # ``content=`` sends no Content-Type header, matching the real backend;
+        # ``text=`` would declare text/plain and defeat the assertion.
+        return httpx.Response(
+            200,
+            content=_complete_stream("hello"),
+            request=request,
+        )
+
+    client = httpx.AsyncClient(
+        base_url="https://chatgpt.com/backend-api/codex/",
+        transport=httpx.MockTransport(handler),
+    )
+    provider = OpenAICodexProvider(
+        _config(), auth=_FakeAuth(), admission=_admission(), client=client
+    )
+
+    body = await _collect(
+        provider.stream_response(
+            _request(),
+            request_id="req_no_content_type",
+            response_model="claude-opus-4",
+        )
+    )
+
+    events = parse_sse_text(body)
+    assert_anthropic_stream_contract(events)
+    assert text_content(events) == "hello"
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stream_response_rejects_declared_non_streaming_payload() -> None:
+    """A response that declares a non-streaming content type is still rejected."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"id": "resp_1", "object": "response", "output": []},
+            request=request,
+        )
+
+    client = httpx.AsyncClient(
+        base_url="https://chatgpt.com/backend-api/codex/",
+        transport=httpx.MockTransport(handler),
+    )
+    provider = OpenAICodexProvider(
+        _config(), auth=_FakeAuth(), admission=_admission(), client=client
+    )
+
+    with pytest.raises(ExecutionFailure) as exc_info:
+        await _collect(
+            provider.stream_response(
+                _request(),
+                request_id="req_json_payload",
+                response_model="claude-opus-4",
+            )
+        )
+
+    assert "non-streaming" in exc_info.value.message
+    await client.aclose()
