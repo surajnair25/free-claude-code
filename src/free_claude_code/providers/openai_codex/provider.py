@@ -227,8 +227,13 @@ class OpenAICodexProvider(BaseProvider):
                             truncated=body_truncated,
                         )
                         raise
+                # The ChatGPT subscription backend streams SSE without declaring a
+                # Content-Type, so only reject a content type that is present and
+                # explicitly not an event stream. A genuine non-streaming payload
+                # still declares application/json and is caught here; malformed or
+                # truncated SSE is caught by _iter_sse and the completion check.
                 content_type = response.headers.get("content-type", "")
-                if "text/event-stream" not in content_type.lower():
+                if content_type and "text/event-stream" not in content_type.lower():
                     body_bytes, body_truncated = await _read_bounded_body(response)
                     error = _TruncatedResponsesStream(
                         "OpenAI returned a non-streaming Responses payload."

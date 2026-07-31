@@ -76,7 +76,7 @@ def test_build_responses_provider_request_preserves_multiturn_protocol() -> None
 
     assert body["model"] == "gpt-test"
     assert body["instructions"] == "System instructions"
-    assert body["max_output_tokens"] == 4096
+    assert "max_output_tokens" not in body
     assert body["stream"] is True
     assert body["store"] is False
     assert body["include"] == ["reasoning.encrypted_content"]
@@ -164,8 +164,6 @@ def test_responses_round_trip_preserves_encrypted_reasoning_and_tool_ids() -> No
     [
         ("stop_sequences", ["stop"]),
         ("top_k", 4),
-        ("context_management", {"edits": []}),
-        ("output_config", {"effort": "high"}),
         ("mcp_servers", [{"name": "server"}]),
         ("extra_body", {"unknown": True}),
     ],
@@ -206,3 +204,57 @@ def test_build_responses_provider_request_rejects_provider_managed_tools() -> No
             request,
             reasoning=ReasoningPolicy.provider_default(),
         )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("context_management", {"edits": [{"type": "clear_tool_uses_20250919"}]}),
+        ("output_config", {"effort": "high"}),
+    ],
+)
+def test_build_responses_provider_request_allows_unforwarded_model_fields(
+    field: str, value: object
+) -> None:
+    """First-class model fields convert without raising and are never forwarded."""
+
+    payload = {
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        field: value,
+    }
+
+    body = build_responses_provider_request(
+        MessagesRequest.model_validate(payload),
+        reasoning=ReasoningPolicy.provider_default(),
+    )
+
+    assert field not in body
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "forwarded_name"),
+    [
+        ("max_tokens", 4096, "max_output_tokens"),
+        ("temperature", 0.7, "temperature"),
+        ("top_p", 0.9, "top_p"),
+        ("metadata", {"user_id": "abc"}, "metadata"),
+    ],
+)
+def test_build_responses_provider_request_omits_unsupported_parameters(
+    field: str, value: object, forwarded_name: str
+) -> None:
+    """The ChatGPT backend rejects these parameters, so they are not forwarded."""
+
+    payload = {
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        field: value,
+    }
+
+    body = build_responses_provider_request(
+        MessagesRequest.model_validate(payload),
+        reasoning=ReasoningPolicy.provider_default(),
+    )
+
+    assert forwarded_name not in body

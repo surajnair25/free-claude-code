@@ -52,14 +52,10 @@ def build_responses_provider_request(
     }
     if instructions:
         body["instructions"] = "\n\n".join(instructions)
-    if request.max_tokens is not None:
-        body["max_output_tokens"] = request.max_tokens
-    if request.temperature is not None:
-        body["temperature"] = request.temperature
-    if request.top_p is not None:
-        body["top_p"] = request.top_p
-    if request.metadata is not None:
-        body["metadata"] = request.metadata
+    # The ChatGPT subscription backend accepts only a restricted subset of the
+    # Responses API and rejects sampling/limit parameters outright with
+    # "Unsupported parameter" 400s, so ``max_tokens``, ``temperature``, ``top_p``
+    # and ``metadata`` are intentionally not forwarded.
     if request.tools:
         body["tools"] = [
             {
@@ -97,10 +93,10 @@ def _validate_supported_request(request: MessagesRequest) -> None:
         unsupported.append("stop_sequences")
     if request.top_k is not None:
         unsupported.append("top_k")
-    if request.context_management:
-        unsupported.append("context_management")
-    if request.output_config:
-        unsupported.append("output_config")
+    # ``context_management`` and ``output_config`` are first-class model fields that
+    # are not forwarded to the Responses API but are allowed so clients do not hit
+    # spurious 400s, matching the OpenAI chat path. Any reasoning effort carried by
+    # ``output_config`` is already resolved into the ReasoningPolicy before this point.
     if request.mcp_servers:
         unsupported.append("mcp_servers")
     if request.extra_body:
